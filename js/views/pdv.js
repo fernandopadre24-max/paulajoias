@@ -1,9 +1,10 @@
 /* PDV — venda rápida */
 import {
-  buscarProduto, listarProdutos, criarVenda, cfg, buscarCliente, listarVendas, getProduto
+  buscarProduto, listarProdutos, criarVenda, cfg, buscarCliente, listarVendas, getProduto,
+  pagamentosDaVenda
 } from '../db.js';
 import { toast, openSheet, openForm, emptyState, confirmDialog, bindSearch } from '../ui.js';
-import { fmtMoney, esc, objUrl, toNumber, round2, hoje, norm } from '../utils.js';
+import { fmtMoney, esc, objUrl, toNumber, round2, hoje, norm, fmtDate, addDays, soma } from '../utils.js';
 import { imprimirRecibo, compartilharRecibo } from '../print.js';
 import { formProduto } from './estoque.js';
 
@@ -420,6 +421,7 @@ async function openPagamento() {
   let parcelas = 1;
   let desconto = 0;
   let receberAgora = true;
+  let valorManual = false;
   let valorRecebido = cartTotal();
 
   const subtotal = cartTotal();
@@ -452,9 +454,12 @@ async function openPagamento() {
       <div class="field-row">
         <div class="field">
           <label>Desconto</label>
-          <div class="input-wrap has-prefix">
-            <span class="prefix">R$</span>
-            <input type="text" inputmode="decimal" id="pg-desconto" value="0,00">
+          <div class="row-flex">
+            <div class="input-wrap has-prefix grow">
+              <span class="prefix">R$</span>
+              <input type="text" inputmode="decimal" id="pg-desconto" value="0,00">
+            </div>
+            <button class="btn btn-outline btn-icon" data-calc-open="pg-desconto" type="button" title="Calculadora" aria-label="Abrir calculadora">🧮</button>
           </div>
         </div>
         <div class="field">
@@ -478,19 +483,23 @@ async function openPagamento() {
       <div class="divider"></div>
 
       <div class="switch">
-        <label for="pg-receber" style="font-weight:700;font-size:14.5px;margin:0">Receber agora</label>
+        <label for="pg-receber" id="pg-receber-label" style="font-weight:700;font-size:14.5px;margin:0">Receber agora</label>
         <input type="checkbox" id="pg-receber" ${receberAgora ? 'checked' : ''}>
         <span class="track"></span>
       </div>
 
       <div class="field mt8" id="pg-valor-wrap">
-        <label>Valor recebido</label>
-        <div class="input-wrap has-prefix">
-          <span class="prefix">R$</span>
-          <input type="text" inputmode="decimal" id="pg-valor" value="${fmtMoney(valorRecebido).replace('R$', '').trim()}">
+        <label id="pg-valor-label">Valor recebido</label>
+        <div class="row-flex">
+          <div class="input-wrap has-prefix grow">
+            <span class="prefix">R$</span>
+            <input type="text" inputmode="decimal" id="pg-valor" value="${fmtMoney(valorRecebido).replace('R$', '').trim()}">
+          </div>
+          <button class="btn btn-outline btn-icon" data-calc-open="pg-valor" type="button" title="Calculadora" aria-label="Abrir calculadora">🧮</button>
         </div>
         <div class="tiny muted" id="pg-troco"></div>
       </div>
+      <div class="tiny" id="pg-plano" style="margin-top:6px"></div>
 
       <div class="field">
         <label>Observação</label>
@@ -509,14 +518,53 @@ async function openPagamento() {
 
   const $ = (sel) => s.sheet.querySelector(sel);
 
+  /* mesmas contas do banco: parcela base arredondada, a última ajusta o resto */
+  function planoParcelas(total) {
+    const base = round2(total / parcelas);
+    return Array.from({ length: parcelas }, (_, i) => (i === parcelas - 1 ? round2(total - base * (parcelas - 1)) : base));
+  }
+
   function totais() {
     const desc = Math.min(toNumber($('#pg-desconto').value), subtotal);
     const total = round2(subtotal - desc);
+    const base = parcelas > 1 ? round2(total / parcelas) : total;
+
+    if (receberAgora && !valorManual) {
+      /* parcelado: recebe só a 1ª parcela (entrada); à vista: o total */
+      valorRecebido = base;
+      $('#pg-valor').value = fmtMoney(base).replace('R$', '').trim();
+    }
+
     $('#pg-totals').innerHTML = `
       <div class="t-line"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
       <div class="t-line"><span>Desconto</span><span>${desc ? `- ${fmtMoney(desc)}` : '—'}</span></div>
       ${parcelas > 1 ? `<div class="t-line"><span>${parcelas}x de</span><span>${fmtMoney(total / parcelas)}</span></div>` : ''}
       <div class="t-line total"><span>Total</span><span>${fmtMoney(total)}</span></div>`;
+
+    $('#pg-receber-label').textContent = parcelas > 1 ? 'Receber entrada (1ª parcela)' : 'Receber agora';
+    $('#pg-valor-label').textContent = parcelas > 1 ? 'Valor recebido agora (entrada)' : 'Valor recebido';
+
+    if (parcelas > 1) {
+      const recebido = receberAgora ? Math.min(toNumber($('#pg-valor').value), total) : 0;
+      let rest = recebido;
+      let quitadas = 0;
+      for (const v of planoParcelas(total)) {
+        if (rest <= 0.005) break;
+        const pago = round2(Math.min(rest, v));
+        rest = round2(rest - pago);
+        if (pago >= v - 0.005) quitadas++;
+        else break;
+      }
+      const emAberto = round2(total - recebido);
+      const prox = quitadas + 1;
+      $('#pg-plano').innerHTML = recebido > 0
+        ? `✅ <b>Entrada de ${fmtMoney(recebido)}</b> paga hoje${quitadas > 1 ? ` (${quitadas} parcelas quitadas)` : ''}<br>⏳ Restante <b>${fmtMoney(emAberto)}</b> em ${parcelas - quitadas} parcela(s) · ${prox}ª vence ${fmtDate(addDays(hoje(), 30 * quitadas))}`
+        : `⏳ <b>${fmtMoney(total)}</b> em aberto · ${parcelas}x de ${fmtMoney(base)} · 1ª vence ${fmtDate(hoje())}`;
+      $('#pg-plano').className = 'tiny muted';
+    } else {
+      $('#pg-plano').innerHTML = '';
+    }
+
     const recebido = toNumber($('#pg-valor').value);
     if (forma === 'dinheiro' && receberAgora) {
       const troco = round2(recebido - total);
@@ -529,9 +577,13 @@ async function openPagamento() {
   }
 
   $('#pg-desconto').addEventListener('input', totais);
-  $('#pg-valor').addEventListener('input', totais);
+  $('#pg-valor').addEventListener('input', () => {
+    valorManual = true;
+    totais();
+  });
   $('#pg-receber').addEventListener('change', (e) => {
     receberAgora = e.target.checked;
+    if (receberAgora) valorManual = false;
     totais();
   });
 
@@ -551,13 +603,14 @@ async function openPagamento() {
         receberAgora = true;
         $('#pg-receber').checked = true;
       }
+      valorManual = false;
       totais();
     };
   });
 
   $('#pg-parcelas').onchange = (e) => {
     parcelas = Number(e.target.value) || 1;
-    if (parcelas > 1 && !receberAgora) { /* mantém */ }
+    valorManual = false;
     totais();
   };
 
@@ -661,11 +714,22 @@ function sucesso(venda, totalRecebido) {
         <div class="kpi-value" style="font-size:27px;margin-top:4px">${fmtMoney(venda.total)}</div>
         <div class="small muted">Venda #${venda.numero} · ${venda.itens.length} item(ns)</div>
         <div class="tiny muted mt8">${esc(venda.clienteNome)}</div>
+        <div class="tiny" id="sucesso-plano"></div>
       </div>`,
     foot: `
       <button class="btn btn-ghost btn-icon" data-rec type="button" title="Recibo">🖨️</button>
       <button class="btn btn-ghost btn-icon" data-share type="button" title="Compartilhar">📤</button>
       <button class="btn btn-primary" data-new type="button">Nova venda</button>`
+  });
+  pagamentosDaVenda(venda.id).then((pags) => {
+    const pago = round2(soma(pags, (p) => p.valor));
+    const restante = round2(Math.max(0, venda.total - pago));
+    const el = s.sheet.querySelector('#sucesso-plano');
+    if (!el) return;
+    el.innerHTML = restante > 0.005
+      ? `<div class="ok-text mt8"><b>Entrada de ${fmtMoney(pago)} recebida</b></div>
+         <div class="warn-text">Restante ${fmtMoney(restante)} em aberto nas datas de vencimento</div>`
+      : `<div class="ok-text mt8"><b>Total recebido</b></div>`;
   });
   s.sheet.querySelector('[data-new]').onclick = () => { s.close(true); document.getElementById('pdv-q')?.focus(); };
   s.sheet.querySelector('[data-rec]').onclick = () => imprimirRecibo(venda);

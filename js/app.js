@@ -2,6 +2,9 @@
 import { openDB, cfg, setCfg, contasAReceber } from './db.js';
 import { toast, closeAllSheets } from './ui.js';
 import { esc } from './utils.js';
+import { abrirCalculadora } from './calculadora.js';
+import { abrirCalendario } from './calendario.js';
+import { iconeTema, rotuloTema, temaAplicado, alternarTema, aplicarTema, lerTemaSalvo } from './tema.js';
 
 import { renderPDV } from './views/pdv.js';
 import { renderVendas, renderVendaDetalhe } from './views/vendas.js';
@@ -54,6 +57,9 @@ export function renderTopbar() {
     ${(actions || []).map((a, i) => `
       <button class="tb-btn${a.ghost ? ' ghost' : ''}" data-action="${i}" type="button" title="${esc(a.label || '')}" aria-label="${esc(a.label || '')}">${a.icon}</button>
     `).join('')}
+    <button class="tb-btn sm" data-calc type="button" title="Calculadora" aria-label="Calculadora">🧮</button>
+    <button class="tb-btn sm" data-cal type="button" title="Calendário" aria-label="Calendário">📅</button>
+    <button class="tb-btn sm" data-tema type="button" title="${esc(rotuloTema())}" aria-label="${esc(rotuloTema())}">${iconeTema()}</button>
     ${mostrarGear ? '<button class="tb-btn" data-gear type="button" aria-label="Configurações">⚙️</button>' : ''}
   `;
   topbarEl.querySelectorAll('[data-action]').forEach((b) => {
@@ -63,6 +69,16 @@ export function renderTopbar() {
     });
   });
   topbarEl.querySelector('[data-gear]')?.addEventListener('click', () => navigate('config'));
+  topbarEl.querySelector('[data-calc]')?.addEventListener('click', () => abrirCalculadora());
+  topbarEl.querySelector('[data-cal]')?.addEventListener('click', () => abrirCalendario());
+  topbarEl.querySelector('[data-tema]')?.addEventListener('click', (e) => {
+    alternarTema();
+    const b = e.currentTarget;
+    b.textContent = iconeTema();
+    b.title = rotuloTema();
+    b.setAttribute('aria-label', rotuloTema());
+    toast(temaAplicado(), 'info');
+  });
 }
 
 function renderTabbar() {
@@ -153,6 +169,7 @@ async function route() {
 
 async function boot() {
   try {
+    aplicarTema(lerTemaSalvo());
     await openDB();
 
     const aceite = await cfg('aceiteInicial', false);

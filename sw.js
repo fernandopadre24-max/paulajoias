@@ -1,4 +1,4 @@
-const CACHE = 'paula-controle-v3';
+const CACHE = 'paula-controle-v4';
 
 const SHELL = [
   './',
@@ -13,6 +13,9 @@ const SHELL = [
   './js/print.js',
   './js/fotos.js',
   './js/catalogo.js',
+  './js/tema.js',
+  './js/calculadora.js',
+  './js/calendario.js',
   './js/views/pdv.js',
   './js/views/vendas.js',
   './js/views/estoque.js',

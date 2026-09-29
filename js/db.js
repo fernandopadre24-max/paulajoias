@@ -312,22 +312,34 @@ export async function criarVenda(dados) {
     }
 
     if (receberAgora) {
-      let restante = valorRecebido === null ? total : round2(valorRecebido);
+      /* Parcelado: recebe só a 1ª parcela (entrada); as demais ficam em aberto
+         até as datas de vencimento. À vista: recebe o total. */
+      const alvo = valorRecebido === null
+        ? (nParc > 1 ? listaParcelas[0].valor : total)
+        : round2(valorRecebido);
+      let restante = alvo;
+      const criados = [];
       for (const par of listaParcelas) {
         if (restante <= 0.005) break;
         const v = round2(Math.min(restante, par.valor));
         restante = round2(restante - v);
-        await req(pgs.put({
+        criados.push({
           id: uid('pag'),
           vendaId: venda.id,
           parcela: par.n,
           valor: v,
           data,
           forma: formaPagamento,
-          obs: 'Recebido na venda',
+          obs: '',
           criadoEm: Date.now()
-        }));
+        });
       }
+      const quitadoTudo = round2(soma(criados, (x) => x.valor)) >= total - 0.005;
+      for (const c of criados) {
+        c.obs = nParc > 1 && !quitadoTudo ? 'Entrada na venda' : 'Recebido na venda';
+        await req(pgs.put(c));
+      }
+      venda.status = quitadoTudo ? 'pago' : criados.length ? 'parcial' : 'pendente';
     }
   }
 

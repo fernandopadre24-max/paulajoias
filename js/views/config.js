@@ -277,7 +277,7 @@ export async function carregarDemo() {
         formaPagamento: forma,
         parcelas,
         data,
-        receberAgora: parcelas === 1 && Math.random() > 0.25,
+        receberAgora: true,
         obs: ''
       });
       criados++;

@@ -1,0 +1,12 @@
+{
+  "name": "paula-controle-bijuterias",
+  "version": "1.0.0",
+  "description": "App de controle de vendas de bijuterias e joias (PWA offline)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js --open",
+    "icons": "node tools/gen-icons.js"
+  }
+}
